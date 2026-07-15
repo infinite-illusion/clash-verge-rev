@@ -1360,6 +1360,7 @@ export interface TranslationResources {
           actions: {
             test: string
           }
+          direct: string
         }
       }
       modals: {
