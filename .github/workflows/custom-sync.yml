@@ -58,6 +58,12 @@ jobs:
         with:
           toolchain: '1.91.0'
 
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: custom-sync
+          workspaces: . -> target
+
       - name: Install pnpm
         uses: pnpm/action-setup@v6
         with:
@@ -73,8 +79,15 @@ jobs:
         run: |
           HOST_TARGET=$(rustc -vV | sed -n 's/^host: //p')
           mkdir -p dist src-tauri/sidecar src-tauri/resources
-          touch "src-tauri/sidecar/verge-mihomo-$HOST_TARGET"
-          touch "src-tauri/sidecar/verge-mihomo-alpha-$HOST_TARGET"
+          for binary in \
+            clash-verge-service \
+            clash-verge-service-install \
+            clash-verge-service-uninstall \
+            verge-mihomo \
+            verge-mihomo-alpha
+          do
+            touch "src-tauri/sidecar/$binary-$HOST_TARGET"
+          done
           pnpm install --frozen-lockfile
           pnpm lint
           pnpm typecheck
