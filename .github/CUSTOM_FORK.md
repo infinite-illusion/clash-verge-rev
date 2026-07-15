@@ -31,6 +31,10 @@ When the version in `package.json` has a matching upstream tag, the workflow
 creates the same tag name on `custom` and dispatches `release.yml`. The app
 version therefore stays identical to upstream.
 
+Personal releases only build macOS ARM64, Windows x64, and Windows ARM64.
+Windows fixed-WebView2 installers are built for both Windows architectures.
+Linux and Intel macOS artifacts are intentionally excluded.
+
 ## Signing and updates
 
 - Tauri updater artifacts are signed with the repository secret
@@ -39,6 +43,8 @@ version therefore stays identical to upstream.
 - macOS artifacts use ad-hoc signing (`signingIdentity: "-"`) so no personal
   Apple Developer identity is exposed.
 - Updater endpoints point only to releases in this repository.
+- Updater manifests contain only macOS ARM64 and the two Windows targets, and
+  are generated from artifacts that have both a download URL and signature.
 
 Keep an offline backup of the updater private key. Losing it means installed
 custom builds cannot verify future updates signed by a replacement key.

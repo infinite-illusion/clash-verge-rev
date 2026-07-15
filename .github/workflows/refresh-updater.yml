@@ -1,0 +1,41 @@
+name: Refresh Updater Manifests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: custom-updater-manifests
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Refresh stable updater manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout custom branch
+        uses: actions/checkout@v6
+        with:
+          ref: custom
+
+      - name: Install Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24.15.0'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Publish updater manifests
+        run: |
+          pnpm updater
+          pnpm updater-fixed-webview2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
