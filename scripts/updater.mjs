@@ -11,15 +11,9 @@ const SUPPORTED_PLATFORMS = new Set([
   'darwin-aarch64-app',
   'windows-x86_64',
   'windows-x86_64-nsis',
-  'windows-aarch64',
-  'windows-aarch64-nsis',
 ])
 
-const REQUIRED_PLATFORMS = [
-  'darwin-aarch64',
-  'windows-x86_64',
-  'windows-aarch64',
-]
+const REQUIRED_PLATFORMS = ['darwin-aarch64', 'windows-x86_64']
 
 async function resolveUpdater() {
   if (process.env.GITHUB_TOKEN === undefined) {

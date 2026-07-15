@@ -19,10 +19,7 @@ async function resolveUpdater() {
   const version = release.tag_name.replace(/^v/, '')
   const platforms = {}
 
-  for (const [platform, arch] of [
-    ['windows-x86_64', 'x64'],
-    ['windows-aarch64', 'arm64'],
-  ]) {
+  for (const [platform, arch] of [['windows-x86_64', 'x64']]) {
     const urlAsset = findAsset(release, `${arch}_fixed_webview2-setup.exe`)
     const signatureAsset = findAsset(
       release,

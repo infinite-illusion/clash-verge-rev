@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+readonly account='infinite-illusion'
+readonly repository='infinite-illusion/clash-verge-rev'
+
+if ! command -v gh >/dev/null 2>&1; then
+  echo 'GitHub CLI (gh) is required.' >&2
+  exit 1
+fi
+
+if ! token="$(env -u GH_TOKEN -u GITHUB_TOKEN gh auth token \
+  --hostname github.com \
+  --user "$account" 2>/dev/null)"; then
+  echo "No stored GitHub CLI credentials found for $account." >&2
+  exit 1
+fi
+
+export GH_TOKEN="$token"
+export GH_REPO="$repository"
+
+if [[ "${1:-}" == 'repo' && "${2:-}" == 'view' ]]; then
+  shift 2
+  exec gh repo view "$repository" "$@"
+fi
+
+exec gh "$@"
