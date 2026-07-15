@@ -1,0 +1,262 @@
+name: Sync Upstream and Release Custom Build
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *'
+
+permissions:
+  actions: write
+  contents: write
+  issues: write
+
+concurrency:
+  group: custom-upstream-sync
+  cancel-in-progress: false
+
+env:
+  HUSKY: 0
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: short
+
+jobs:
+  sync:
+    name: Mirror upstream and update custom
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout custom branch
+        uses: actions/checkout@v6
+        with:
+          ref: custom
+          fetch-depth: 0
+
+      - name: Configure Git and fetch upstream
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote add upstream https://github.com/clash-verge-rev/clash-verge-rev.git
+          git fetch --prune --no-tags upstream main dev
+          git fetch --prune --no-tags origin main dev custom
+
+      - name: Mirror upstream main and dev
+        run: |
+          git push --force origin refs/remotes/upstream/main:refs/heads/main
+          git push --force origin refs/remotes/upstream/dev:refs/heads/dev
+
+      - name: Merge upstream main into custom
+        run: |
+          git switch custom
+          git merge --no-edit upstream/main
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxslt1.1 libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Install Rust 1.91.0
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.91.0'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24.15.0'
+          cache: pnpm
+
+      - name: Validate custom branch
+        run: |
+          HOST_TARGET=$(rustc -vV | sed -n 's/^host: //p')
+          mkdir -p dist src-tauri/sidecar src-tauri/resources
+          touch "src-tauri/sidecar/verge-mihomo-$HOST_TARGET"
+          touch "src-tauri/sidecar/verge-mihomo-alpha-$HOST_TARGET"
+          pnpm install --frozen-lockfile
+          pnpm lint
+          pnpm typecheck
+          cargo check -q -p clash-verge --features verge-dev
+
+      - name: Push custom branch
+        run: git push origin custom
+
+      - name: Validate custom code against upstream dev
+        id: dev_compat
+        continue-on-error: true
+        run: |
+          git diff --binary upstream/main..custom -- . \
+            ':(exclude).github/**' \
+            ':(exclude)src-tauri/tauri.conf.json' \
+            ':(exclude)src-tauri/webview2.arm64.json' \
+            ':(exclude)src-tauri/webview2.x64.json' \
+            ':(exclude)src-tauri/webview2.x86.json' \
+            ':(exclude)src/services/cmds.ts' > /tmp/custom-code.patch
+          git switch --detach upstream/dev
+          trap 'git reset --hard upstream/dev' EXIT
+          git apply --3way /tmp/custom-code.patch
+          git show custom:.github/scripts/custom-dev-compat.mjs | node
+          git diff --check
+          pnpm install --frozen-lockfile
+          pnpm lint
+          pnpm typecheck
+          cargo check -q -p clash-verge --features verge-dev
+
+      - name: Create matching tag and dispatch release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git switch custom
+          VERSION=$(jq -r .version package.json)
+          TAG="v$VERSION"
+
+          UPSTREAM_TAG=$(git ls-remote upstream "refs/tags/$TAG^{}" | awk '{print $1}')
+          if [ -z "$UPSTREAM_TAG" ]; then
+            UPSTREAM_TAG=$(git ls-remote upstream "refs/tags/$TAG" | awk '{print $1}')
+          fi
+          if [ -z "$UPSTREAM_TAG" ]; then
+            echo "Upstream has not published $TAG yet; release is deferred."
+            exit 0
+          fi
+          if ! git merge-base --is-ancestor "$UPSTREAM_TAG" upstream/main; then
+            echo "Upstream tag $TAG is not part of upstream/main."
+            exit 1
+          fi
+
+          CUSTOM_COMMIT=$(git rev-parse custom)
+          if git ls-remote --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+            TAG_COMMIT=$(git rev-list -n 1 "$TAG")
+            if ! git merge-base --is-ancestor "$TAG_COMMIT" "$CUSTOM_COMMIT"; then
+              echo "Existing $TAG is not part of custom history; refusing to rewrite it."
+              exit 1
+            fi
+          else
+            git tag -a "$TAG" -m "Custom build for upstream $TAG"
+            git push origin "refs/tags/$TAG"
+          fi
+
+          if gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --jq ".[] | select(.tag_name == \"$TAG\") | .id" | grep -q .; then
+            echo "A release already exists for $TAG."
+            exit 0
+          fi
+
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+
+      - name: Report upstream dev compatibility failure
+        if: ${{ steps.dev_compat.outcome == 'failure' }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const title = '[custom-sync] Custom code is incompatible with upstream dev';
+            const body = `The stable custom branch was synchronized, but its code did not apply or validate against upstream dev: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            const existing = issues.find(issue => issue.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+              });
+            }
+
+      - name: Close resolved upstream dev compatibility issue
+        if: ${{ steps.dev_compat.outcome == 'success' }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const title = '[custom-sync] Custom code is incompatible with upstream dev';
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            const existing = issues.find(issue => issue.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: `Compatibility with upstream dev recovered in ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}.`,
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                state: 'closed',
+              });
+            }
+
+      - name: Report sync failure
+        if: ${{ failure() }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const title = '[custom-sync] Upstream synchronization failed';
+            const body = `The custom synchronization workflow failed: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            const existing = issues.find(issue => issue.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+              });
+            }
+
+      - name: Close resolved sync failure issue
+        if: ${{ success() }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const title = '[custom-sync] Upstream synchronization failed';
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            const existing = issues.find(issue => issue.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: `Synchronization recovered in ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}.`,
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                state: 'closed',
+              });
+            }

@@ -17,7 +17,10 @@
     "copyright": "GNU General Public License v3.0",
     "category": "DeveloperTool",
     "shortDescription": "Clash Verge Rev",
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "macOS": {
+      "signingIdentity": "-"
+    }
   },
   "build": {
     "beforeBuildCommand": "pnpm run web:build",
@@ -30,11 +33,11 @@
   "identifier": "io.github.clash-verge-rev.clash-verge-rev",
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQyOEMyRjBCQkVGOUJEREYKUldUZnZmbStDeStNMHU5Mmo1N24xQXZwSVRYbXA2NUpzZE5oVzlqeS9Bc0t6RVV4MmtwVjBZaHgK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYwNDlFODk2ODJBODUyNDYKUldSR1VxaUNsdWhKWUtFbUhRckJpY1lydG9UWndlQ3M3OXV5UnVZNzRtSU9oTk5qTnYxb1NyVDkK",
       "endpoints": [
-        "https://update.hwdns.net/https://github.com/clash-verge-rev/clash-verge-rev/releases/download/updater/update-proxy.json",
-        "https://gh-proxy.org/https://github.com/clash-verge-rev/clash-verge-rev/releases/download/updater/update-proxy.json",
-        "https://github.com/clash-verge-rev/clash-verge-rev/releases/download/updater/update.json"
+        "https://update.hwdns.net/https://github.com/infinite-illusion/clash-verge-rev/releases/download/updater/update-proxy.json",
+        "https://gh-proxy.org/https://github.com/infinite-illusion/clash-verge-rev/releases/download/updater/update-proxy.json",
+        "https://github.com/infinite-illusion/clash-verge-rev/releases/download/updater/update.json"
       ],
       "windows": {
         "installMode": "passive"
