@@ -139,6 +139,8 @@ interface IRuleProviderItem {
 interface ITrafficItem {
   up: number
   down: number
+  upTotal?: number
+  downTotal?: number
   up_rate?: number
   down_rate?: number
   last_updated?: number

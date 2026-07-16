@@ -41,6 +41,8 @@ export const LayoutTraffic = () => {
       trafficRef.current.appendData({
         up: traffic?.up || 0,
         down: traffic?.down || 0,
+        upTotal: traffic?.upTotal || 0,
+        downTotal: traffic?.downTotal || 0,
       })
     }
   }, [traffic])
