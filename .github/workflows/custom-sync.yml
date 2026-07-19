@@ -29,6 +29,12 @@ jobs:
         with:
           ref: custom
           fetch-depth: 0
+          # The default GITHUB_TOKEN (the `actions` GitHub App) cannot push
+          # changes under .github/workflows/, so upstream dev commits that
+          # touch workflow files get rejected by the mirror push. A PAT with
+          # Contents + Workflows permission (repo secret CUSTOM_SYNC_TOKEN)
+          # is required instead.
+          token: ${{ secrets.CUSTOM_SYNC_TOKEN }}
 
       - name: Configure Git and fetch upstream
         run: |
@@ -37,6 +43,15 @@ jobs:
           git remote add upstream https://github.com/clash-verge-rev/clash-verge-rev.git
           git fetch --prune --no-tags upstream main dev
           git fetch --prune --no-tags origin main dev custom
+
+      - name: Verify sync token
+        env:
+          SYNC_TOKEN: ${{ secrets.CUSTOM_SYNC_TOKEN }}
+        run: |
+          if [ -z "$SYNC_TOKEN" ]; then
+            echo "::error::Repository secret CUSTOM_SYNC_TOKEN is not set. Create a fine-grained PAT (Contents: Read and write, Workflows: Read and write) scoped to this repo and add it as the CUSTOM_SYNC_TOKEN secret, otherwise mirroring upstream workflow changes will be rejected."
+            exit 1
+          fi
 
       - name: Mirror upstream main and dev
         run: |
