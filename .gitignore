@@ -14,5 +14,6 @@ scripts/_env.sh
 .changelog_backups
 target
 .vfox.toml
-.vfox/
+.vfox
 .claude
+.zed

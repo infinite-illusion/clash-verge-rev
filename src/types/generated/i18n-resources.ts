@@ -379,7 +379,7 @@ export interface TranslationResources {
             importSuccess: string
             profileReactivated: string
             profileSwitched: string
-            switchInterrupted: string
+            switchBusy: string
           }
         }
         importForm: {
@@ -842,6 +842,7 @@ export interface TranslationResources {
             }
             fakeIpFilterMode: string
             fakeIpRange: string
+            fakeIpRange6: string
             fallback: {
               description: string
               label: string
@@ -980,11 +981,6 @@ export interface TranslationResources {
           }
           title: string
         }
-        password: {
-          prompts: {
-            enterRoot: string
-          }
-        }
         sysproxy: {
           actions: {
             editPac: string
@@ -1046,7 +1042,6 @@ export interface TranslationResources {
           }
           messages: {
             breakChangeError: string
-            portableError: string
           }
           title: string
         }

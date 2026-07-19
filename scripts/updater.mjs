@@ -1,5 +1,4 @@
 import { context, getOctokit } from '@actions/github'
-import fetch from 'node-fetch'
 
 const UPDATE_TAG_NAME = 'updater'
 const UPDATE_JSON_FILE = 'update.json'
