@@ -7,6 +7,7 @@ import {
   ListItemIcon,
   ListItemText,
   styled,
+  useTheme,
   type SxProps,
   type Theme,
 } from '@mui/material'
@@ -14,6 +15,9 @@ import {
 import { BaseLoading } from '@/components/base'
 import { useProxyDelayState } from '@/hooks/use-proxy-delay-state'
 import delayManager from '@/services/delay'
+
+import { ProxySparkline } from './proxy-sparkline'
+import { resolveDelayColor } from './proxy-sparkline-utils'
 
 interface Props {
   group: IProxyGroupItem
@@ -50,6 +54,8 @@ export const ProxyItem = (props: Props) => {
     proxy,
     group.name,
   )
+  const { palette } = useTheme()
+  const sparkColor = resolveDelayColor(delayValue, timeout, palette)
 
   return (
     <ListItem sx={sx}>
@@ -119,6 +125,11 @@ export const ProxyItem = (props: Props) => {
             display: isPreset ? 'none' : '',
           }}
         >
+          <ProxySparkline
+            history={proxy.history}
+            color={sparkColor}
+            timeout={timeout}
+          />
           {delayValue === -2 && (
             <Widget>
               <BaseLoading />

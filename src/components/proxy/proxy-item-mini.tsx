@@ -1,10 +1,20 @@
 import { CheckCircleOutlineRounded } from '@mui/icons-material'
-import { alpha, Box, ListItemButton, styled, Typography } from '@mui/material'
+import {
+  alpha,
+  Box,
+  ListItemButton,
+  styled,
+  Typography,
+  useTheme,
+} from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
 import { BaseLoading } from '@/components/base'
 import { useProxyDelayState } from '@/hooks/use-proxy-delay-state'
 import delayManager from '@/services/delay'
+
+import { ProxySparkline } from './proxy-sparkline'
+import { resolveDelayColor } from './proxy-sparkline-utils'
 
 interface Props {
   group: IProxyGroupItem
@@ -25,6 +35,8 @@ export const ProxyItemMini = (props: Props) => {
     proxy,
     group.name,
   )
+  const { palette } = useTheme()
+  const sparkColor = resolveDelayColor(delayValue, timeout, palette)
 
   return (
     <ListItemButton
@@ -203,6 +215,14 @@ export const ProxyItemMini = (props: Props) => {
               sx={{ fontSize: 16, mr: 0.5, display: 'block' }}
             />
           )}
+        <ProxySparkline
+          history={proxy.history}
+          color={sparkColor}
+          timeout={timeout}
+          width={32}
+          height={10}
+          strokeWidth={1.25}
+        />
       </Box>
       {group.fixed && group.fixed === proxy.name && (
         // 展示 fixed 状态
