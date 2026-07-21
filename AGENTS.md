@@ -1,5 +1,25 @@
 # Repository Agent Instructions
 
+## Repository Context and Branch Contract
+
+This repository is the user's personal fork of
+`clash-verge-rev/clash-verge-rev`, hosted as
+`infinite-illusion/clash-verge-rev`. It is maintained as both a faithful
+mirror of the upstream project and a place for the user's own custom work.
+
+- `upstream` is the canonical `clash-verge-rev/clash-verge-rev` repository.
+- `main` must remain a strict mirror of `upstream/main`.
+- `dev` must remain a strict mirror of `upstream/dev`.
+- Do not make product, feature, fix, or configuration commits directly on
+  `main` or `dev`, and do not merge `custom` into either mirror branch.
+- `custom` is the user's personal customization branch and the default branch
+  for this fork. Put the user's custom features, fixes, release configuration,
+  and other fork-specific changes there. `custom` is intentionally allowed to
+  differ from upstream while incorporating the desired upstream baseline.
+- Only branch-synchronization work should update the mirror branches. For that
+  work, preserve the exact upstream relationship rather than treating the
+  branches as ordinary development branches.
+
 ## GitHub Identity and Remote Operations
 
 These rules are mandatory for every agent working in this repository.

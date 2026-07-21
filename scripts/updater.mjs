@@ -56,6 +56,7 @@ async function resolveUpdater() {
   const updateData = {
     ...sourceManifest,
     version,
+    notes: release.body?.trim() || sourceManifest.notes,
     pub_date: release.published_at ?? sourceManifest.pub_date,
     platforms,
   }
