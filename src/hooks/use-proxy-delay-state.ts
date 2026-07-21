@@ -43,26 +43,27 @@ export function useProxyDelayState(
 
   const updateDelay = useCallback(() => {
     if (!proxy) return
-    const cachedUpdate = delayManager.getDelayUpdate(proxy.name, groupName)
-    if (cachedUpdate) {
-      setDelayState({ ...cachedUpdate })
-      return
-    }
 
+    // 不再因手动测速缓存而短路：交给 getDelayFix 按「更新的来源」裁决
+    // （history 随轮询带回、cache 由手动测速写入），
+    // 这样 URLTest 等自动选择组在节点切换/health-check 后徽标会跟着刷新
+    const cachedUpdate = delayManager.getDelayUpdate(proxy.name, groupName)
     const fallbackDelay = delayManager.getDelayFix(proxy, groupName)
+
     if (fallbackDelay === -1) {
       setDelayState({ delay: -1, updatedAt: 0 })
       return
     }
 
+    // updatedAt 取两个来源中较新者，与 getDelayFix 的裁决保持一致
     let updatedAt = 0
     const history = proxy.history
     if (history && history.length > 0) {
-      const lastRecord = history[history.length - 1]
-      const parsed = Date.parse(lastRecord.time)
-      if (!Number.isNaN(parsed)) {
-        updatedAt = parsed
-      }
+      const parsed = Date.parse(history[history.length - 1].time)
+      if (!Number.isNaN(parsed)) updatedAt = parsed
+    }
+    if (cachedUpdate && cachedUpdate.updatedAt > updatedAt) {
+      updatedAt = cachedUpdate.updatedAt
     }
 
     setDelayState({ delay: fallbackDelay, updatedAt })

@@ -185,19 +185,37 @@ class DelayManager {
     return update ? update.delay : -1
   }
 
-  /// 暂时修复provider的节点延迟排序的问题
+  /// 统一延迟取值：以「更新的来源」为准
+  /// - history 由 mihomo 后端 health-check 写入，随轮询实时带回
+  /// - cache 仅由手动测速写入（含 -2 测速中），当后端产出更新的 history 时让位
   getDelayFix(proxy: IProxyItem, group: string) {
+    const history = proxy.history
+    const lastRecord =
+      history && history.length > 0 ? history[history.length - 1] : null
+    const historyTime = lastRecord ? Date.parse(lastRecord.time) : NaN
+    const historyDelay =
+      lastRecord && lastRecord.delay !== undefined
+        ? lastRecord.delay
+        : undefined
+
     if (!proxy.provider) {
       const update = this.getDelayUpdate(proxy.name, group)
-      if (update && (update.delay >= 0 || update.delay === -2)) {
-        return update.delay
+      if (update) {
+        // 后端 health-check 产出了比手动测速缓存更新的数据时，优先以后端为准
+        const historyIsNewer =
+          historyDelay !== undefined &&
+          !Number.isNaN(historyTime) &&
+          historyTime > update.updatedAt
+        if (!historyIsNewer && (update.delay >= 0 || update.delay === -2)) {
+          return update.delay
+        }
       }
     }
 
-    // 添加 history 属性的安全检查
-    if (proxy.history && proxy.history.length > 0) {
+    // provider 节点（沿用既有行为，始终以 history 为准），或非 provider 缓存缺失/过期/被更新覆盖
+    if (historyDelay !== undefined) {
       // 0ms以error显示
-      return proxy.history[proxy.history.length - 1].delay || 1e6
+      return historyDelay || 1e6
     }
     return -1
   }
