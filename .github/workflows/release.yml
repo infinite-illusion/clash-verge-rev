@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -69,7 +69,7 @@ jobs:
     needs: [release, release-for-fixed-webview2]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Fetch UPDATE logs
         id: fetch_update_logs
@@ -158,12 +158,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Rust Stable
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: '1.91.0'
+          toolchain: '1.95.0'
           targets: ${{ matrix.target }}
 
       - name: Add Rust Target
@@ -181,9 +181,9 @@ jobs:
           cache-workspace-crates: true
 
       - name: Install Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
-          node-version: '24.15.0'
+          node-version: '24.19.0'
 
       - uses: pnpm/action-setup@v6
         name: Install pnpm
@@ -198,12 +198,13 @@ jobs:
       - name: Add Rust Target
         run: |
           # Ensure cross target is installed for the pinned toolchain; fallback without explicit toolchain if needed
-          rustup target add ${{ matrix.target }} --toolchain 1.91.0 || rustup target add ${{ matrix.target }}
+          rustup target add ${{ matrix.target }} --toolchain 1.95.0 || rustup target add ${{ matrix.target }}
           rustup target list --installed
           echo "Rust target ${{ matrix.target }} installed."
 
       - name: Tauri build
-        # 上游 5.24 修改了 latest.json 的生成逻辑，且依赖 tauri-plugin-update 2.10.0 暂未发布，故锁定在 0.5.23 版本
+        # 定制流程仍由 tauri-action 创建 draft，再由 update_tag 统一发布并刷新 Updater；
+        # 在完整迁移到 upstream 的 releaseId 流程前保留已验证的 action 版本。
         uses: tauri-apps/tauri-action@v0.6.2
         env:
           NODE_OPTIONS: '--max_old_space_size=4096'
@@ -244,12 +245,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Rust Stable
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: '1.91.0'
+          toolchain: '1.95.0'
           targets: ${{ matrix.target }}
 
       - name: Add Rust Target
@@ -267,9 +268,9 @@ jobs:
           cache-workspace-crates: true
 
       - name: Install Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
-          node-version: '24.15.0'
+          node-version: '24.19.0'
 
       - uses: pnpm/action-setup@v6
         name: Install pnpm
@@ -291,7 +292,7 @@ jobs:
       - name: Add Rust Target
         run: |
           # Ensure cross target is installed for the pinned toolchain; fallback without explicit toolchain if needed
-          rustup target add ${{ matrix.target }} --toolchain 1.91.0 || rustup target add ${{ matrix.target }}
+          rustup target add ${{ matrix.target }} --toolchain 1.95.0 || rustup target add ${{ matrix.target }}
           rustup target list --installed
           echo "Rust target ${{ matrix.target }} installed."
 
@@ -354,12 +355,12 @@ jobs:
     needs: [update_tag]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
-          node-version: '24.15.0'
+          node-version: '24.19.0'
 
       - uses: pnpm/action-setup@v6
         name: Install pnpm
@@ -380,12 +381,12 @@ jobs:
     needs: [update_tag]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
-          node-version: '24.15.0'
+          node-version: '24.19.0'
 
       - uses: pnpm/action-setup@v6
         name: Install pnpm

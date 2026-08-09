@@ -3,6 +3,11 @@ import { useCallback, useEffect, useReducer } from 'react'
 
 import { useVerge } from '@/hooks/use-verge'
 import delayManager, { type DelayUpdate } from '@/services/delay'
+import {
+  isInteractableMember,
+  memberDetails,
+  type ResolvedProxyMember,
+} from '@/types/proxy-view'
 
 const PRESET_PROXY_NAMES = [
   'DIRECT',
@@ -21,35 +26,40 @@ export interface UseProxyDelayState {
   delayValue: number
   isPreset: boolean
   timeout: number
-  onDelay: (providerName?: string) => Promise<void>
+  onDelay: () => Promise<void>
 }
 
 export function useProxyDelayState(
-  proxy: IProxyItem,
+  member: ResolvedProxyMember,
   groupName: string,
 ): UseProxyDelayState {
-  const isPreset = PRESET_PROXY_NAMES.includes(proxy.name)
+  const name = member.ref.name
+  const details = memberDetails(member)
+  const unresolved = member.kind === 'unresolved'
+  const isPreset = unresolved || PRESET_PROXY_NAMES.includes(name)
   const [delayState, setDelayState] = useReducer(identity, INITIAL_DELAY)
   const { verge } = useVerge()
   const timeout = verge?.default_latency_timeout || 10000
 
   useEffect(() => {
     if (isPreset) return
-    delayManager.setListener(proxy.name, groupName, setDelayState)
+    delayManager.setListener(name, groupName, setDelayState)
     return () => {
-      delayManager.removeListener(proxy.name, groupName)
+      delayManager.removeListener(name, groupName)
     }
-  }, [proxy.name, groupName, isPreset])
+  }, [name, groupName, isPreset])
 
   const updateDelay = useCallback(() => {
-    if (!proxy) return
+    if (unresolved) {
+      setDelayState(INITIAL_DELAY)
+      return
+    }
 
-    // 不再因手动测速缓存而短路：交给 getDelayFix 按「更新的来源」裁决
-    // （history 随轮询带回、cache 由手动测速写入），
-    // 这样 URLTest 等自动选择组在节点切换/health-check 后徽标会跟着刷新
-    const cachedUpdate = delayManager.getDelayUpdate(proxy.name, groupName)
-    const fallbackDelay = delayManager.getDelayFix(proxy, groupName)
-
+    // 不再因手动测速缓存而短路：交给 getDelayFix 按「更新的来源」裁决。
+    // history 随轮询带回，cache 由手动测速写入；URLTest 节点切换或
+    // health-check 后，徽标和排序应跟随更新的来源。
+    const cachedUpdate = delayManager.getDelayUpdate(name, groupName)
+    const fallbackDelay = delayManager.getDelayFix(member, groupName)
     if (fallbackDelay === -1) {
       setDelayState({ delay: -1, updatedAt: 0 })
       return
@@ -57,7 +67,7 @@ export function useProxyDelayState(
 
     // updatedAt 取两个来源中较新者，与 getDelayFix 的裁决保持一致
     let updatedAt = 0
-    const history = proxy.history
+    const history = details?.history
     if (history && history.length > 0) {
       const parsed = Date.parse(history[history.length - 1].time)
       if (!Number.isNaN(parsed)) updatedAt = parsed
@@ -67,22 +77,16 @@ export function useProxyDelayState(
     }
 
     setDelayState({ delay: fallbackDelay, updatedAt })
-  }, [proxy, groupName])
+  }, [details?.history, groupName, member, name, unresolved])
 
   useEffect(() => {
     updateDelay()
   }, [updateDelay])
 
-  const onDelay = useLockFn(async (providerName?: string) => {
+  const onDelay = useLockFn(async () => {
+    if (!isInteractableMember(member)) return
     setDelayState({ delay: -2, updatedAt: Date.now() })
-    setDelayState(
-      await delayManager.checkDelay(
-        proxy.name,
-        groupName,
-        timeout,
-        providerName,
-      ),
-    )
+    setDelayState(await delayManager.checkDelay(member, groupName, timeout))
   })
 
   return {

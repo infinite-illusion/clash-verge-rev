@@ -10,18 +10,16 @@ import {
   styled,
   alpha,
 } from '@mui/material'
-import { UnlistenFn } from '@tauri-apps/api/event'
 import { useLockFn } from 'ahooks'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { BaseLoading } from '@/components/base'
 import { useIconCache } from '@/hooks/use-icon-cache'
-import { useListen } from '@/hooks/use-listen'
 import { cmdTestDelay } from '@/services/cmds'
 import delayManager from '@/services/delay'
+import { subscribeVergeEvents } from '@/services/events'
 import { showNotice } from '@/services/notice-service'
-import { debugLog } from '@/utils/debug'
 
 import { TestBox } from './test-box'
 
@@ -56,7 +54,6 @@ export const TestItem = ({
   const [chains, setChains] = useState<string[]>([])
   const { uid, name, icon, url } = itemData
   const iconCachePath = useIconCache({ icon, cacheKey: uid })
-  const { addListener } = useListen()
 
   const onDelay = useCallback(async () => {
     setDelay(-2)
@@ -81,8 +78,8 @@ export const TestItem = ({
   })
 
   const menu = [
-    { label: 'Edit', handler: onEditTest },
-    { label: 'Delete', handler: onDelete },
+    { label: t('shared.actions.edit'), handler: onEditTest },
+    { label: t('shared.actions.delete'), handler: onDelete },
   ]
 
   // mihomo chains: exit node first, top-level group last.
@@ -97,29 +94,10 @@ export const TestItem = ({
   const showGroup = !!group && group !== exitNode
   const fullChainText = [...chains].reverse().join(' / ')
 
-  useEffect(() => {
-    let unlistenFn: UnlistenFn | null = null
-
-    const setupListener = async () => {
-      if (unlistenFn) {
-        unlistenFn()
-      }
-      unlistenFn = await addListener('verge://test-all', () => {
-        onDelay()
-      })
-    }
-
-    setupListener()
-
-    return () => {
-      if (unlistenFn) {
-        debugLog(
-          `TestItem for ${id} unmounting or url changed, cleaning up test-all listener.`,
-        )
-        unlistenFn()
-      }
-    }
-  }, [url, addListener, onDelay, id])
+  useEffect(
+    () => subscribeVergeEvents({ 'verge://test-all': () => onDelay() }),
+    [url, onDelay],
+  )
 
   return (
     <Box
@@ -283,7 +261,7 @@ export const TestItem = ({
             sx={{ minWidth: 120 }}
             dense
           >
-            {t(item.label)}
+            {item.label}
           </MenuItem>
         ))}
       </Menu>

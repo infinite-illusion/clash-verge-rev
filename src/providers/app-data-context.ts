@@ -1,15 +1,12 @@
 import { Context, createContext, use } from 'react'
-import {
-  BaseConfig,
-  ProxyProvider,
-  Rule,
-  RuleProvider,
-} from 'tauri-plugin-mihomo-api'
+import { BaseConfig, Rule, RuleProvider } from 'tauri-plugin-mihomo-api'
+
+import type { ProxyViewV1 } from '@/types/proxy-view'
 
 export interface ProxiesContextType {
-  proxies: any
-  proxyProviders: Record<string, ProxyProvider | undefined>
-  isProxiesPending: boolean
+  proxyView: ProxyViewV1 | undefined
+  isProxyViewPending: boolean
+  isProxyViewError: boolean
 }
 
 export interface RulesContextType {
@@ -25,6 +22,7 @@ export interface ClashConfigContextType {
 export interface SystemContextType {
   sysproxy: any
   runningMode?: string
+  isRunningModePending: boolean
   systemProxyAddress: string
 }
 
@@ -37,13 +35,12 @@ export interface CoreDataStatusContextType {
 }
 
 export interface RefreshersContextType {
-  refreshProxy: () => Promise<any>
-  refreshClashConfig: () => Promise<any>
-  refreshRules: () => Promise<any>
-  refreshSysproxy: () => Promise<any>
-  refreshProxyProviders: () => Promise<any>
-  refreshRuleProviders: () => Promise<any>
-  refreshAll: () => Promise<any>
+  refreshProxy: () => Promise<unknown>
+  refreshClashConfig: () => Promise<unknown>
+  refreshRules: () => Promise<unknown>
+  refreshSysproxy: () => Promise<unknown>
+  refreshRuleProviders: () => Promise<unknown>
+  refreshAll: () => Promise<unknown>
 }
 
 export const ProxiesContext = createContext<ProxiesContextType | null>(null)
@@ -65,18 +62,8 @@ const useCtx = <T>(ctx: Context<T | null>, hookName: string): T => {
   return v
 }
 
-export const useProxiesData = () => {
-  const { proxies, proxyProviders, isProxiesPending } = useCtx(
-    ProxiesContext,
-    'useProxiesData',
-  )
-
-  return {
-    proxies,
-    proxyProviders: proxyProviders as Record<string, ProxyProvider>,
-    isProxiesPending,
-  }
-}
+export const useProxiesData = (): ProxiesContextType =>
+  useCtx(ProxiesContext, 'useProxiesData')
 
 export const useRulesData = () => {
   const { rules, ruleProviders } = useCtx(RulesContext, 'useRulesData')
