@@ -4,14 +4,17 @@ use crate::module::lightweight;
 use crate::utils;
 use crate::utils::window_manager::WindowManager;
 use clash_verge_logging::{Type, logging};
+use parking_lot::Mutex;
 use tokio::time::Duration;
 #[cfg(target_os = "macos")]
 use tokio::time::timeout;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Default)]
 pub struct CleanupResult {
     pub all_success: bool,
     pub core_stopped: bool,
+    /// Why the stop failed, for the cancelled-exit notice.
+    pub stop_error: Option<String>,
 }
 
 const fn should_abort_exit_after_cleanup(core_stopped: bool) -> bool {
@@ -29,14 +32,12 @@ where
     AncillaryFuture: std::future::Future<Output = bool>,
 {
     if !stop_core().await {
-        return CleanupResult {
-            all_success: false,
-            core_stopped: false,
-        };
+        return CleanupResult::default();
     }
     CleanupResult {
         all_success: ancillary_cleanup().await,
         core_stopped: true,
+        stop_error: None,
     }
 }
 
@@ -87,11 +88,11 @@ async fn restore_dns_after_core_stop() -> bool {
     .await
     {
         Ok(_) => {
-            logging!(info, Type::Window, "DNS设置已恢复");
+            logging!(debug, Type::Window, "DNS设置已恢复");
             true
         }
         Err(_) => {
-            logging!(warn, Type::Window, "Warning: 恢复DNS设置超时");
+            logging!(warn, Type::Window, "恢复DNS设置超时");
             false
         }
     }
@@ -116,7 +117,6 @@ pub async fn quit() -> clash_verge_signal::ShutdownOutcome {
 
     Config::apply_all_and_save_file().await;
 
-    logging!(info, Type::System, "开始异步清理资源");
     let cleanup_result = clean_async().await;
 
     logging!(
@@ -128,7 +128,10 @@ pub async fn quit() -> clash_verge_signal::ShutdownOutcome {
 
     if should_abort_exit_after_cleanup(cleanup_result.core_stopped) {
         handle::Handle::global().clear_is_exiting();
-        handle::Handle::notice_message("app_quit::core_stop_failed", "");
+        handle::Handle::notice_message(
+            "app_quit::core_stop_failed",
+            cleanup_result.stop_error.unwrap_or_default(),
+        );
         return clash_verge_signal::ShutdownOutcome::Canceled;
     }
 
@@ -139,26 +142,19 @@ pub async fn quit() -> clash_verge_signal::ShutdownOutcome {
 }
 
 pub async fn clean_async() -> CleanupResult {
-    logging!(
-        info,
-        Type::System,
-        "Starting interactive cleanup; controlled core stop will be awaited to completion"
-    );
-
-    let result = run_interactive_cleanup_transition(
+    let stop_error = Mutex::new(None);
+    let mut result = run_interactive_cleanup_transition(
         || async {
-            logging!(info, Type::System, "Stopping core for interactive quit or restart");
+            logging!(debug, Type::System, "Stopping core for interactive quit or restart");
             match CoreManager::global().stop_core().await {
-                Ok(()) => {
-                    logging!(info, Type::Window, "Core stopped for interactive quit or restart");
-                    true
-                }
+                Ok(()) => true,
                 Err(error) => {
                     logging!(
                         warn,
                         Type::Window,
                         "Controlled core stop failed; interactive quit or restart must remain cancelled: {error:#}"
                     );
+                    *stop_error.lock() = Some(format!("{error:#}"));
                     false
                 }
             }
@@ -166,6 +162,7 @@ pub async fn clean_async() -> CleanupResult {
         restore_dns_after_core_stop,
     )
     .await;
+    result.stop_error = stop_error.into_inner();
 
     logging!(
         info,
@@ -192,11 +189,10 @@ pub async fn clean_session_ending_best_effort() -> CleanupResult {
 
     let result = run_session_ending_cleanup_transition(
         || async {
-            logging!(info, Type::System, "Stopping core during session-ending best-effort cleanup");
-            match CoreManager::global().stop_core().await {
+                    let _ = handle::Handle::mihomo().clear_all_ws_connections();
+                    match CoreManager::global().stop_core().await {
                 Ok(()) => {
-                    logging!(info, Type::Window, "Core stopped during session-ending best-effort cleanup");
-                    true
+                                    true
                 }
                 Err(error) => {
                     logging!(

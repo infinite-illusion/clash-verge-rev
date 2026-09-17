@@ -231,6 +231,18 @@ export interface TranslationResources {
           title: string
           unavailableMessage: string
         }
+        sysproxyPrivilege: {
+          alternative: string
+          applying: string
+          installing: string
+          later: string
+          message: string
+          restarting: string
+          serviceReadyMessage: string
+          title: string
+          tunMessage: string
+          tunTitle: string
+        }
       }
       feedback: {
         errors: {
@@ -380,6 +392,9 @@ export interface TranslationResources {
           types: {
             local: string
             remote: string
+          }
+          warnings: {
+            frequentUpdate: string
           }
         }
         proxiesEditor: {
@@ -796,6 +811,14 @@ export interface TranslationResources {
             sidecarFailed: string
             uninstallFailed: string
           }
+          sysproxy: {
+            coreNotReady: string
+            directFallback: string
+            guardStopped: string
+            privilegeRequired: string
+            sidecarWhileServiceReady: string
+            systemCallFailed: string
+          }
         }
         notifications: {
           clash: {
@@ -808,6 +831,7 @@ export interface TranslationResources {
           }
           clashService: {
             installSuccess: string
+            sidecarFallback: string
             uninstallSuccess: string
           }
           updater: {
@@ -1013,6 +1037,13 @@ export interface TranslationResources {
           messages: {
             configError: string
             saved: string
+          }
+          protection: {
+            autoDisabled: string
+            enableAnyway: string
+            keepDisabled: string
+            message: string
+            title: string
           }
           sections: {
             fallbackFilter: string
@@ -1297,11 +1328,17 @@ export interface TranslationResources {
         proxyControl: {
           actions: {
             installService: string
+            switchToServiceMode: string
             uninstallService: string
           }
           fields: {
             systemProxy: string
             tunMode: string
+          }
+          messages: {
+            installedCheckProxy: string
+            installedCoreNotOnService: string
+            installedProxyRestored: string
           }
           tooltips: {
             systemProxy: string

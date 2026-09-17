@@ -10,7 +10,6 @@ use crate::{
 };
 use anyhow::{Context as _, Result};
 use clash_verge_logging::Type;
-use compact_str::CompactString;
 use log::Level;
 use scopeguard::defer;
 use std::path::Path;
@@ -19,23 +18,47 @@ use tauri_plugin_shell::ShellExt as _;
 
 const SIDECAR_READINESS_ATTEMPTS: usize = 30;
 
+#[cfg(target_os = "windows")]
+async fn retry_service_start<Start, StartFuture>(
+    attempts: usize,
+    retry_delay: std::time::Duration,
+    mut start: Start,
+) -> Result<()>
+where
+    Start: FnMut() -> StartFuture,
+    StartFuture: std::future::Future<Output = Result<()>>,
+{
+    let mut last_error = None;
+    for attempt in 0..attempts {
+        match start().await {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                logging!(
+                    warn,
+                    Type::Core,
+                    "service start attempt {}/{} failed: {error:#}",
+                    attempt + 1,
+                    attempts
+                );
+                if error
+                    .downcast_ref::<service::ServiceStartRefusal>()
+                    .is_some_and(|refusal| service::StageRequest::is_about_the_bundle(refusal.code))
+                {
+                    return Err(error);
+                }
+                last_error = Some(error);
+                if attempt + 1 < attempts {
+                    tokio::time::sleep(retry_delay).await;
+                }
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("service start failed")))
+}
+
 impl CoreManager {
-    /// A core process is up: put back the node selections the user made.
-    ///
-    /// mihomo restores these itself, from the `cache.db` it keeps in the directory it was started
-    /// against — but only when `profile.store-selected` is on and that file survived, and neither
-    /// is something the app can assume. The setting comes from a merge template a user is free to
-    /// replace, and a service older than the durable runtime generation hands every start a
-    /// directory nothing has ever run in. The app holds the same selections in the profile, so it
-    /// is the one that can say for certain.
-    ///
-    /// Awaited, and deliberately here rather than beside the proxy: the caller enables the system
-    /// proxy as soon as the start returns, and pointing it at a core still on the first entry of
-    /// every group is what this exists to prevent. The wait is bounded — what cannot be put back
-    /// yet keeps being retried in the background — so a core that will not answer delays a start
-    /// instead of blocking it.
-    ///
-    /// Repeat calls supersede each other, so every start path may call this without coordinating.
+    /// Restores profile selections before callers enable the system proxy.
+    /// The bounded first pass continues in the background, and later calls supersede earlier ones.
     async fn restore_selected_nodes(&self) {
         if PROFILE_SELECTIONS_PENDING_COMMIT
             .try_with(|pending| *pending)
@@ -63,7 +86,16 @@ where
     for attempt in 0..max_attempts {
         match probe().await {
             Ok(()) => return Ok(()),
-            Err(error) => last_error = Some(error),
+            Err(error) => {
+                logging!(
+                    debug,
+                    Type::Core,
+                    "sidecar readiness probe {}/{} failed: {error:#}",
+                    attempt + 1,
+                    max_attempts
+                );
+                last_error = Some(error);
+            }
         }
         if attempt + 1 < max_attempts {
             tokio::time::sleep(retry_delay).await;
@@ -94,26 +126,28 @@ use {
 };
 
 impl CoreManager {
-    pub async fn get_clash_logs(&self) -> Result<Vec<CompactString>> {
+    pub async fn get_clash_logs(&self) -> Result<Vec<String>> {
         match *self.get_running_mode() {
             RunningMode::Service => service::get_clash_logs_by_service().await,
-            RunningMode::Sidecar => Ok(CLASH_LOGGER.get_logs().await),
+            RunningMode::Sidecar => Ok(CLASH_LOGGER.get_logs()),
             RunningMode::NotRunning => Ok(Vec::new()),
         }
     }
 
+    #[tracing::instrument(skip_all, level = "info", fields(pid = tracing::field::Empty))]
     pub(super) async fn start_core_by_sidecar(&self) -> Result<()> {
-        logging!(info, Type::Core, "Starting core in sidecar mode");
         self.core_stopped();
 
         let sidecar_ipc = dirs::sidecar_ipc_path()?;
         handle::Handle::app_handle()
             .mihomo()
             .update_socket_path(dirs::path_to_str(&sidecar_ipc)?.to_owned())?;
-        let config_file = Config::generate_file(crate::config::ConfigType::Run).await?;
+        let config_file = Config::generate_file().await?;
         let app_handle = handle::Handle::app_handle();
         let clash_core = Config::verge().await.latest_arc().get_valid_clash_core();
         let config_dir = dirs::app_home_dir()?;
+        #[cfg(unix)]
+        discard_unwritable_core_cache(&config_dir);
 
         #[cfg(unix)]
         let previous_mask = unsafe { tauri_plugin_clash_verge_sysinfo::libc::umask(0o077) };
@@ -172,7 +206,7 @@ impl CoreManager {
         };
 
         let pid = child.pid();
-        logging!(trace, Type::Core, "Sidecar started with PID: {}", pid);
+        tracing::Span::current().record("pid", pid);
 
         let readiness = poll_sidecar_readiness(SIDECAR_READINESS_ATTEMPTS, SIDECAR_READINESS_INTERVAL, || async {
             tokio::time::timeout(SIDECAR_READINESS_PROBE_TIMEOUT, async {
@@ -206,22 +240,22 @@ impl CoreManager {
                 match event {
                     tauri_plugin_shell::process::CommandEvent::Stdout(line)
                     | tauri_plugin_shell::process::CommandEvent::Stderr(line) => {
-                        let message = CompactString::from(&*String::from_utf8_lossy(&line));
+                        let message = String::from_utf8_lossy(&line).into_owned();
                         Logger::global().writer_sidecar_log(Level::Error, &message);
-                        CLASH_LOGGER.append_log(message).await;
+                        CLASH_LOGGER.append_log(message);
                     }
                     tauri_plugin_shell::process::CommandEvent::Terminated(term) => {
                         let manager = Self::global();
                         let _ = manager.invalidate_core_readiness_if(core_readiness_generation);
                         let message = if let Some(code) = term.code {
-                            CompactString::from(format!("Process terminated with code: {}", code))
+                            format!("Process terminated with code: {}", code)
                         } else if let Some(signal) = term.signal {
-                            CompactString::from(format!("Process terminated by signal: {}", signal))
+                            format!("Process terminated by signal: {}", signal)
                         } else {
-                            CompactString::from("Process terminated")
+                            String::from("Process terminated")
                         };
                         Logger::global().writer_sidecar_log(Level::Info, &message);
-                        CLASH_LOGGER.clear_logs().await;
+                        CLASH_LOGGER.clear_logs();
                         manager.clear_terminated_sidecar(pid).await;
                         break;
                     }
@@ -236,7 +270,6 @@ impl CoreManager {
     /// Terminates the sidecar after its caller has successfully cleared the
     /// system proxy.
     pub(super) fn stop_core_by_sidecar_unprepared(&self) {
-        logging!(info, Type::Core, "Stopping sidecar");
         defer! {
             self.core_stopped();
         }
@@ -248,30 +281,19 @@ impl CoreManager {
                 // Setting the job handle to None clears the stored handle and
                 // closes the previous Windows job handle in `set_job_handle`.
                 self.set_job_handle(None);
-                logging!(
-                    trace,
-                    Type::Core,
-                    "Closed job handle for sidecar process (PID: {})",
-                    pid
-                );
+                let _ = pid;
             }
 
-            let result = child.kill();
-            logging!(
-                trace,
-                Type::Core,
-                "Sidecar stopped (PID: {:?}, Result: {:?})",
-                pid,
-                result
-            );
+            if let Err(error) = child.kill() {
+                logging!(warn, Type::Core, "failed to terminate sidecar PID {pid}: {error:#}");
+            }
         }
     }
 
     pub(super) async fn start_core_by_service(&self) -> Result<()> {
-        logging!(info, Type::Core, "Starting core in service mode");
         self.core_starting();
         let service_ipc = dirs::ipc_path()?;
-        let config_file = Config::generate_file(crate::config::ConfigType::Run).await?;
+        let config_file = Config::generate_file().await?;
         handle::Handle::app_handle()
             .mihomo()
             .update_socket_path(dirs::path_to_str(&service_ipc)?.to_owned())?;
@@ -279,35 +301,21 @@ impl CoreManager {
         self.start_core_by_service_with_config(&config_file).await
     }
 
+    #[tracing::instrument(skip_all, level = "info", fields(config_file = %config_file.display()))]
     pub(super) async fn start_core_by_service_with_config(&self, config_file: &Path) -> Result<()> {
         // 交接时等待 sidecar 释放 ext-controller 通道。
         #[cfg(target_os = "windows")]
         {
             use crate::constants::timing;
-            let mut last_err = None;
-            for attempt in 0..timing::SERVICE_START_RETRIES {
-                match service::run_core_by_service(config_file).await {
-                    Ok(()) => {
-                        self.mark_core_ready();
-                        self.core_started(RunningMode::Service);
-                        self.restore_selected_nodes().await;
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        logging!(
-                            warn,
-                            Type::Core,
-                            "service start attempt {}/{} failed: {}",
-                            attempt + 1,
-                            timing::SERVICE_START_RETRIES,
-                            e
-                        );
-                        last_err = Some(e);
-                        tokio::time::sleep(timing::SERVICE_START_RETRY_DELAY).await;
-                    }
-                }
-            }
-            Err(last_err.unwrap_or_else(|| anyhow::anyhow!("service start failed")))
+            retry_service_start(timing::SERVICE_START_RETRIES, timing::SERVICE_START_RETRY_DELAY, || {
+                service::run_core_by_service(config_file)
+            })
+            .await?;
+            self.mark_core_ready();
+            self.core_started(RunningMode::Service);
+            self.restore_selected_nodes().await;
+            service::request_runtime_provider_sync(timing::RUNTIME_PROVIDER_SYNC_DELAY);
+            Ok(())
         }
 
         #[cfg(not(target_os = "windows"))]
@@ -316,12 +324,12 @@ impl CoreManager {
             self.mark_core_ready();
             self.core_started(RunningMode::Service);
             self.restore_selected_nodes().await;
+            service::request_runtime_provider_sync(crate::constants::timing::RUNTIME_PROVIDER_SYNC_DELAY);
             Ok(())
         }
     }
 
     pub(super) async fn stop_core_by_service(&self) -> Result<()> {
-        logging!(info, Type::Core, "Stopping service");
         service::stop_core_by_service().await?;
         self.core_stopped();
         Ok(())
@@ -338,6 +346,107 @@ impl CoreManager {
         self.set_job_handle(None);
         proxy_control::stop_guard().await;
         self.core_stopped();
+    }
+}
+
+/// Drops a `cache.db` the current user cannot write before handing the directory to the core.
+///
+/// mihomo keeps `profile.store-selected` in `cache.db` inside its data directory. Service builds
+/// before the runtime staging rework ran the core as root against this same directory without a
+/// umask, leaving the file as `root:staff 0644`: still readable, so the core loads stale
+/// selections, but never writable again, so it silently stops recording new ones. Nothing
+/// repairs it either, because the service-side cleanup only runs inside the service. Removing it
+/// lets the core recreate the cache under the current user; the fake-ip leases and frozen
+/// selections that go with it could not be updated anyway.
+#[cfg(unix)]
+fn discard_unwritable_core_cache(config_dir: &Path) {
+    let cache = config_dir.join("cache.db");
+    // Appending neither creates nor truncates, so this only asks whether a write would be allowed.
+    match std::fs::OpenOptions::new().append(true).open(&cache) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            // Unlinking is governed by the directory, which the current user owns.
+            match std::fs::remove_file(&cache) {
+                Ok(()) => logging!(
+                    info,
+                    Type::Core,
+                    "Discarded a core cache the current user cannot write: {}",
+                    cache.display()
+                ),
+                Err(error) => logging!(
+                    warn,
+                    Type::Core,
+                    "Failed to discard the unwritable core cache {}: {error}",
+                    cache.display()
+                ),
+            }
+        }
+        Err(error) => logging!(
+            warn,
+            Type::Core,
+            "Failed to probe the core cache {}: {error}",
+            cache.display()
+        ),
+    }
+}
+
+#[cfg(all(test, unix))]
+mod core_cache_tests {
+    use super::discard_unwritable_core_cache;
+    use std::os::unix::fs::PermissionsExt as _;
+
+    fn scratch(name: &str) -> anyhow::Result<std::path::PathBuf> {
+        let root = std::env::temp_dir().join(format!("clash-verge-core-cache-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root)?;
+        Ok(root)
+    }
+
+    #[test]
+    fn an_unwritable_cache_is_discarded() -> anyhow::Result<()> {
+        // root ignores the permission bits, so the probe cannot fail there.
+        if unsafe { tauri_plugin_clash_verge_sysinfo::libc::geteuid() } == 0 {
+            return Ok(());
+        }
+        let root = scratch("unwritable")?;
+        let cache = root.join("cache.db");
+        std::fs::write(&cache, b"stale")?;
+        std::fs::set_permissions(&cache, std::fs::Permissions::from_mode(0o444))?;
+
+        discard_unwritable_core_cache(&root);
+
+        assert!(!cache.exists(), "an unwritable cache must not be handed to the core");
+        let _ = std::fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    #[test]
+    fn a_writable_cache_is_kept() -> anyhow::Result<()> {
+        let root = scratch("writable")?;
+        let cache = root.join("cache.db");
+        std::fs::write(&cache, b"live")?;
+
+        discard_unwritable_core_cache(&root);
+
+        assert_eq!(
+            std::fs::read(&cache)?,
+            b"live",
+            "a writable cache carries the stored selections and must survive"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    #[test]
+    fn a_missing_cache_is_not_an_error() -> anyhow::Result<()> {
+        let root = scratch("missing")?;
+
+        discard_unwritable_core_cache(&root);
+
+        assert!(!root.join("cache.db").exists());
+        let _ = std::fs::remove_dir_all(&root);
+        Ok(())
     }
 }
 
@@ -469,8 +578,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    // 起一个长命子进程用于验证 Job Object 的生命周期绑定。
-    // 直接使用 System32 下的 ping.exe，避免 cmd 中间层。
+    // Use ping directly as a long-lived process without a cmd.exe intermediary.
     fn spawn_long_lived() -> Result<Child> {
         let child = Command::new("ping")
             .args(["-n", "999", "127.0.0.1"])
@@ -480,7 +588,6 @@ mod tests {
         Ok(child)
     }
 
-    // 在超时内轮询子进程是否退出，返回是否已退出。
     fn wait_until_exited(child: &mut Child, timeout: Duration) -> Result<bool> {
         let deadline = Instant::now() + timeout;
         loop {
@@ -494,21 +601,17 @@ mod tests {
         }
     }
 
-    // 成功路径：进程被分配进 Job Object 后仍存活；drop Job 句柄触发
-    // KILL_ON_JOB_CLOSE，进程应在超时内被 OS 终止。
     #[test]
     fn job_kills_child_on_handle_drop() -> Result<()> {
         let mut child = spawn_long_lived()?;
 
         let job = create_and_assign_sidecar_job(child.id())?;
 
-        // 分配后进程应仍在运行。
         assert!(
             child.try_wait()?.is_none(),
             "child should still be running after being assigned to the job"
         );
 
-        // 关闭 Job 句柄，OS 应连带终止其成员进程。
         drop(job);
 
         assert!(
@@ -519,10 +622,9 @@ mod tests {
         Ok(())
     }
 
-    // 失败路径：对一个不存在的 PID 调用时 OpenProcess 应失败，函数返回 Err。
     #[test]
     fn returns_err_for_invalid_pid() {
-        // PID 必须为 4 的倍数且极不可能存在；0xFFFF_FFFC 对应不到真实进程。
+        // Windows PIDs are multiples of four; this one is effectively impossible.
         let result = create_and_assign_sidecar_job(0xFFFF_FFFC);
         assert!(result.is_err(), "expected Err for a non-existent PID");
     }

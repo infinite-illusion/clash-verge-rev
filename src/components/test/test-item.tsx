@@ -1,5 +1,3 @@
-import { useSortable } from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
 import { LanguageRounded } from '@mui/icons-material'
 import {
   Box,
@@ -24,29 +22,12 @@ import { showNotice } from '@/services/notice-service'
 import { TestBox } from './test-box'
 
 interface Props {
-  id: string
   itemData: IVergeTestItem
   onEdit: () => void
   onDelete: (uid: string) => void
 }
 
-export const TestItem = ({
-  id,
-  itemData,
-  onEdit,
-  onDelete: removeTest,
-}: Props) => {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({
-    id,
-  })
-
+export const TestItem = ({ itemData, onEdit, onDelete: removeTest }: Props) => {
   const { t } = useTranslation()
   const [anchorEl, setAnchorEl] = useState<any>(null)
   const [position, setPosition] = useState({ left: 0, top: 0 })
@@ -100,14 +81,7 @@ export const TestItem = ({
   )
 
   return (
-    <Box
-      sx={{
-        position: 'relative',
-        transform: CSS.Transform.toString(transform),
-        transition,
-        zIndex: isDragging ? 'calc(infinity)' : undefined,
-      }}
-    >
+    <Box>
       <TestBox
         onContextMenu={(event) => {
           const { clientX, clientY } = event
@@ -116,26 +90,23 @@ export const TestItem = ({
           event.preventDefault()
         }}
       >
-        <Box
-          sx={{ position: 'relative', cursor: 'move' }}
-          ref={setNodeRef}
-          {...attributes}
-          {...listeners}
-        >
+        <Box data-sortable-handle sx={{ position: 'relative', cursor: 'move' }}>
           {icon && icon.trim() !== '' ? (
             <Box sx={{ display: 'flex', justifyContent: 'center' }}>
               {icon.trim().startsWith('http') && (
                 <img
+                  alt={name}
                   src={iconCachePath === '' ? icon : iconCachePath}
                   height="40px"
                 />
               )}
               {icon.trim().startsWith('data') && (
-                <img src={icon} height="40px" />
+                <img alt={name} src={icon} height="40px" />
               )}
               {icon.trim().startsWith('<svg') && (
                 <img
-                  src={`data:image/svg+xml;base64,${btoa(icon)}`}
+                  alt={name}
+                  src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(icon)}`}
                   height="40px"
                 />
               )}
