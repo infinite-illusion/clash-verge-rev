@@ -12,6 +12,7 @@ import {
 } from '@/types/proxy-view'
 import { debugLog } from '@/utils/debug'
 import { classifyDelay, DEFAULT_DELAY_TIMEOUT } from '@/utils/delay'
+import { isValidUrl } from '@/utils/network'
 
 /** A group's delays, handed to sorting as a value it can depend on. */
 export type DelaySnapshot = {
@@ -171,6 +172,11 @@ class DelayManager {
   }
 
   setUrl(group: string, url: string) {
+    if (!isValidUrl(url)) {
+      debugLog(`[DelayManager] 拒绝无效测试URL，组: ${group}, URL: ${url}`)
+      this.urlMap.delete(group)
+      return
+    }
     debugLog(`[DelayManager] 设置测试URL，组: ${group}, URL: ${url}`)
     this.urlMap.set(group, url)
   }
