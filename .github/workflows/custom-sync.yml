@@ -68,10 +68,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libxslt1.1 libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
 
-      - name: Install Rust 1.95.0
+      - name: Install Rust 1.99.0
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: '1.95.0'
+          toolchain: '1.99.0'
 
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2

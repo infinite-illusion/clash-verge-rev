@@ -34,7 +34,6 @@ export function useProxyDelayState(
   groupName: string,
 ): UseProxyDelayState {
   const name = member.ref.name
-  const details = memberDetails(member)
   const unresolved = member.kind === 'unresolved'
   const isPreset = unresolved || PRESET_PROXY_NAMES.includes(name)
   const [delayState, setDelayState] = useReducer(identity, INITIAL_DELAY)
@@ -43,50 +42,55 @@ export function useProxyDelayState(
 
   useEffect(() => {
     if (isPreset) return
-    delayManager.setListener(name, groupName, setDelayState)
+    delayManager.setListener(member, groupName, setDelayState)
     return () => {
-      delayManager.removeListener(name, groupName)
+      delayManager.removeListener(member, groupName)
     }
-  }, [name, groupName, isPreset])
+  }, [member, groupName, isPreset])
 
   const updateDelay = useCallback(() => {
     if (unresolved) {
       setDelayState(INITIAL_DELAY)
       return
     }
+    // getDelayUpdate 已按「更新的来源」裁决：后端 health-check / 分组测速
+    // 的 history 更新时优先后端，否则返回手动测速缓存（含 TTL）。
+    const cachedUpdate = delayManager.getDelayUpdate(member, groupName)
+    if (cachedUpdate) {
+      setDelayState({ ...cachedUpdate })
+      return
+    }
 
-    // 不再因手动测速缓存而短路：交给 getDelayFix 按「更新的来源」裁决。
-    // history 随轮询带回，cache 由手动测速写入；URLTest 节点切换或
-    // health-check 后，徽标和排序应跟随更新的来源。
-    const cachedUpdate = delayManager.getDelayUpdate(name, groupName)
+    // 无缓存时回退 getDelayFix（含 provider history 等兜底路径）
     const fallbackDelay = delayManager.getDelayFix(member, groupName)
     if (fallbackDelay === -1) {
       setDelayState({ delay: -1, updatedAt: 0 })
       return
     }
 
-    // updatedAt 取两个来源中较新者，与 getDelayFix 的裁决保持一致
+    // updatedAt 从 history 推导，与 getDelayFix 的取值来源保持一致
     let updatedAt = 0
-    const history = details?.history
+    const history =
+      delayManager.getHistory(member, groupName) ??
+      memberDetails(member)?.history
     if (history && history.length > 0) {
       const parsed = Date.parse(history[history.length - 1].time)
       if (!Number.isNaN(parsed)) updatedAt = parsed
     }
-    if (cachedUpdate && cachedUpdate.updatedAt > updatedAt) {
-      updatedAt = cachedUpdate.updatedAt
-    }
 
     setDelayState({ delay: fallbackDelay, updatedAt })
-  }, [details?.history, groupName, member, name, unresolved])
+  }, [groupName, member, unresolved])
 
   useEffect(() => {
     updateDelay()
-  }, [updateDelay])
+    return delayManager.addGroupListener(groupName, updateDelay)
+  }, [groupName, updateDelay])
 
   const onDelay = useLockFn(async () => {
     if (!isInteractableMember(member)) return
     setDelayState({ delay: -2, updatedAt: Date.now() })
-    setDelayState(await delayManager.checkDelay(member, groupName, timeout))
+    await delayManager.checkDelay(member, groupName, timeout)
+    updateDelay()
   })
 
   return {
