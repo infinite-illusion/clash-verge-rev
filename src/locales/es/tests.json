@@ -37,6 +37,7 @@
       "yes": "Soportado",
       "no": "No soportado",
       "failed": "Prueba fallida",
+      "risky": "Dudoso",
       "completed": "Detección completada",
       "disallowedIsp": "Proveedor de servicios de Internet no permitido",
       "originalsOnly": "Solo originales",

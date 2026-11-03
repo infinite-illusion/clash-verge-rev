@@ -19,13 +19,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  check_tag_version:
-    name: Check Release Tag and package.json Version Consistency
+  prepare_release:
+    name: Approve Snapshot and Prepare Draft Release
+    if: >-
+      ${{ github.event_name == 'push' ||
+          (github.event.changes.body &&
+           github.event.pull_request.head.repo.full_name == github.repository &&
+           github.event.pull_request.user.login == 'github-actions[bot]' &&
+           startsWith(github.event.pull_request.head.ref, 'publish/v') &&
+           contains(github.event.pull_request.body, '[x] Publish this approved release')) }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    outputs:
+      release_tag: ${{ steps.source.outputs.release_tag }}
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      channel: ${{ steps.source.outputs.channel }}
+      release_id: ${{ steps.draft.outputs.id }}
     steps:
-      - name: Checkout repository
+      - name: Checkout trusted release tooling
         uses: actions/checkout@v7
         with:
+          ref: refs/heads/dev
           fetch-depth: 0
 
       - name: Check if tag is from custom branch
@@ -64,12 +82,19 @@ jobs:
           echo "✅ Tag and package.json version are consistent."
 
   update_tag:
-    name: Update tag
+    name: Publish Completed Release
+    env:
+      RELEASE_TAG: ${{ needs.prepare_release.outputs.release_tag }}
+    outputs:
+      source_sha: ${{ needs.prepare_release.outputs.source_sha }}
+      channel: ${{ needs.prepare_release.outputs.channel }}
     runs-on: ubuntu-latest
     needs: [release, release-for-fixed-webview2]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare_release.outputs.source_sha }}
 
       - name: Fetch UPDATE logs
         id: fetch_update_logs
@@ -79,7 +104,7 @@ jobs:
       - name: Set Env
         run: |
           echo "BUILDTIME=$(TZ=Asia/Shanghai date)" >> $GITHUB_ENV
-          TAG_REF="${GITHUB_REF##*/}"
+          TAG_REF="$RELEASE_TAG"
           echo "TAG_NAME=$TAG_REF" >> $GITHUB_ENV
           VERSION=$(echo "$TAG_REF" | sed 's/^v//')
           echo "VERSION=$VERSION" >> $GITHUB_ENV
@@ -114,10 +139,16 @@ jobs:
           Created at ${{ env.BUILDTIME }}.
           EOF
 
+      - name: Verify release tag still points to the approved source
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_SHA: ${{ needs.prepare_release.outputs.source_sha }}
+        run: node scripts-workflow/release.mjs verify-target
+
       - name: Publish Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PRERELEASE: ${{ contains(github.ref_name, '-rc') }}
+          PRERELEASE: ${{ contains(env.RELEASE_TAG, '-rc') }}
         run: |
           matches=$(gh api repos/{owner}/{repo}/releases --paginate --jq '.[] | select(.tag_name == env.TAG_NAME) | [.id, .draft, (.assets | length), .html_url] | @tsv')
           release_count=$(grep -c . <<< "$matches" || true)
@@ -159,11 +190,13 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare_release.outputs.source_sha }}
 
       - name: Install Rust Stable
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: '1.99.0'
+          toolchain: '1.99.1'
           targets: ${{ matrix.target }}
 
       - name: Add Rust Target
@@ -183,7 +216,7 @@ jobs:
       - name: Install Node
         uses: actions/setup-node@v7
         with:
-          node-version: '24.19.0'
+          node-version: '26.13.0'
 
       - uses: pnpm/action-setup@v6
         name: Install pnpm
@@ -197,7 +230,7 @@ jobs:
 
       - name: Add Rust Target
         run: |
-          rustup target add ${{ matrix.target }} --toolchain 1.99.0 || rustup target add ${{ matrix.target }}
+          rustup target add ${{ matrix.target }} --toolchain 1.99.1 || rustup target add ${{ matrix.target }}
           rustup target list --installed
           echo "Rust target ${{ matrix.target }} installed."
 
@@ -217,7 +250,7 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-rc') }}
           tauriScript: pnpm
           args: --target ${{ matrix.target }}
-          includeUpdaterJson: true
+          uploadUpdaterJson: ${{ needs.prepare_release.outputs.channel == 'stable' }}
 
       - name: Attest Windows bundles
         if: matrix.os == 'windows-latest'
@@ -245,11 +278,13 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare_release.outputs.source_sha }}
 
       - name: Install Rust Stable
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: '1.99.0'
+          toolchain: '1.99.1'
           targets: ${{ matrix.target }}
 
       - name: Add Rust Target
@@ -269,7 +304,7 @@ jobs:
       - name: Install Node
         uses: actions/setup-node@v7
         with:
-          node-version: '24.19.0'
+          node-version: '26.13.0'
 
       - uses: pnpm/action-setup@v6
         name: Install pnpm
@@ -290,7 +325,7 @@ jobs:
 
       - name: Add Rust Target
         run: |
-          rustup target add ${{ matrix.target }} --toolchain 1.99.0 || rustup target add ${{ matrix.target }}
+          rustup target add ${{ matrix.target }} --toolchain 1.99.1 || rustup target add ${{ matrix.target }}
           rustup target list --installed
           echo "Rust target ${{ matrix.target }} installed."
 
@@ -341,19 +376,52 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-rc') }}
           files: target/${{ matrix.target }}/release/bundle/nsis/*setup*
 
+  prepare-next-dev:
+    name: Prepare Next Dev Version
+    if: ${{ needs.update_tag.outputs.channel == 'stable' }}
+    needs: [prepare_release, update_tag]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: prepare-release
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ needs.prepare_release.outputs.release_tag }}
+      SOURCE_SHA: ${{ needs.prepare_release.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/heads/dev
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.13.0'
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - name: Prepare version and changelog PR
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          node scripts-workflow/release.mjs next-dev
+
   release-update:
-    if: ${{ !contains(github.ref_name, '-rc') }}
+    if: ${{ needs.update_tag.outputs.channel == 'stable' }}
     name: Release Update
     runs-on: ubuntu-latest
     needs: [update_tag]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.update_tag.outputs.source_sha }}
 
       - name: Install Node
         uses: actions/setup-node@v7
         with:
-          node-version: '24.19.0'
+          node-version: '26.13.0'
 
       - uses: pnpm/action-setup@v6
         name: Install pnpm
@@ -369,17 +437,19 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   release-update-for-fixed-webview2:
-    if: ${{ !contains(github.ref_name, '-rc') }}
+    if: ${{ needs.update_tag.outputs.channel == 'stable' }}
     runs-on: ubuntu-latest
     needs: [update_tag]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.update_tag.outputs.source_sha }}
 
       - name: Install Node
         uses: actions/setup-node@v7
         with:
-          node-version: '24.19.0'
+          node-version: '26.13.0'
 
       - uses: pnpm/action-setup@v6
         name: Install pnpm

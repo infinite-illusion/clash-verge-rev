@@ -37,6 +37,7 @@
       "yes": "Unterstützt",
       "no": "Nicht unterstützt",
       "failed": "Test fehlgeschlagen",
+      "risky": "Ungewiss",
       "completed": "Prüfung abgeschlossen",
       "disallowedIsp": "Nicht zugelassener Internetdienstanbieter",
       "originalsOnly": "Nur Original",

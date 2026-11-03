@@ -125,11 +125,13 @@ pub async fn change_clash_mode(mode: String) -> Result<(), String> {
 /// `chains` follows mihomo's convention: exit node first, top-level group last.
 /// Empty when the request did not go through mihomo (system proxy & TUN both off)
 /// or the connection could not be matched.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TestDelayResult {
     pub delay: u32,
-    pub chains: Vec<String>,
+    // std String, not the file-level smartstring alias: specta::Type only
+    // covers standard strings and this struct crosses the IPC boundary.
+    pub chains: Vec<std::string::String>,
 }
 
 /// Look up the proxy chain of the mihomo connection whose source port matches
@@ -244,7 +246,10 @@ pub async fn test_delay(url: String) -> anyhow::Result<TestDelayResult> {
             // negligible vs the 10s timeout, so it won't flip a slow success into a
             // timeout in practice.
             let chains = chains_for_source_port(source_port, proxy_port).await;
-            Ok(TestDelayResult { delay, chains })
+            Ok(TestDelayResult {
+                delay,
+                chains: chains.into_iter().map(Into::into).collect(),
+            })
         } else {
             let (mut stream, req) = match proxy_port {
                 Some(pp) => {
@@ -269,7 +274,10 @@ pub async fn test_delay(url: String) -> anyhow::Result<TestDelayResult> {
             // negligible vs the 10s timeout, so it won't flip a slow success into a
             // timeout in practice.
             let chains = chains_for_source_port(source_port, proxy_port).await;
-            Ok(TestDelayResult { delay, chains })
+            Ok(TestDelayResult {
+                delay,
+                chains: chains.into_iter().map(Into::into).collect(),
+            })
         }
     })
     .await
